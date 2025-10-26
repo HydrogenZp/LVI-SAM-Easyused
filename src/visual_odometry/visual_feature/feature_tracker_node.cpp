@@ -193,6 +193,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
             //cv::Mat stereo_img(ROW * NUM_OF_CAM, COL, CV_8UC3);
             pub_img = ptr->image;
 
+            ROS_INFO("Load the model.");
             // detect->Inference(pub_img);
 
             for (int i = 0; i < NUM_OF_CAM; i++)
