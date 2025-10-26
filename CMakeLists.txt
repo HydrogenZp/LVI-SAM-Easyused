@@ -17,6 +17,7 @@ add_definitions(-DIF_OFFICIAL=0)
 set(CMAKE_BUILD_TYPE "Release")
 set(CMAKE_CXX_FLAGS "-std=c++11")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g -pthread")
+set(OpenCV_DIR "/LVI-SAM/opencv-4.8.1/build")
 
 ######################
 ### Packages
@@ -41,7 +42,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 find_package(OpenMP REQUIRED)
 find_package(PCL REQUIRED)
-find_package(OpenCV REQUIRED)
+find_package(OpenCV 4.8.1 REQUIRED PATHS /LVI-SAM/opencv-4.8.1/build NO_DEFAULT_PATH)
 find_package(Ceres REQUIRED)
 find_package(GTSAM REQUIRED QUIET)
 find_package(Boost REQUIRED COMPONENTS filesystem program_options system timer)
