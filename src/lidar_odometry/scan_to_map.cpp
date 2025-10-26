@@ -27,8 +27,16 @@ public:
         pubKeyPoses = nh.advertise<sensor_msgs::PointCloud2>(PROJECT_NAME + "/lidar/mapping/trajectory", 1);
         pubRecentKeyFrame = nh.advertise<sensor_msgs::PointCloud2>(PROJECT_NAME + "/lidar/mapping/cloud_registered", 1);
 
+        // Load tuning parameters
+        nh.param<int>(PROJECT_NAME + "/scan_to_map/max_iter_count", max_iter_count, 30);
+        nh.param<float>(PROJECT_NAME + "/scan_to_map/convergence_deltaR", convergence_deltaR, 1e-3);
+        nh.param<float>(PROJECT_NAME + "/scan_to_map/convergence_deltaT", convergence_deltaT, 1e-3);
+        nh.param<int>(PROJECT_NAME + "/scan_to_map/min_laserCloudSelNum", min_laserCloudSelNum, 50);
+        nh.param<double>(PROJECT_NAME + "/scan_to_map/imu_weight", imu_weight, 0.01);
+
         allocateMemory();
-        ROS_INFO("ScanToMap node started");
+        ROS_INFO("ScanToMap node started with tuning params: max_iter=%d, deltaR=%.6f, deltaT=%.6f, min_sel=%d, imu_w=%.4f",
+                 max_iter_count, convergence_deltaR, convergence_deltaT, min_laserCloudSelNum, imu_weight);
     }
 
 private:
@@ -36,6 +44,13 @@ private:
     ros::Publisher pubOdomAftMappedROS;
     ros::Publisher pubKeyPoses;
     ros::Publisher pubRecentKeyFrame;
+
+    // Tuning parameters
+    int max_iter_count;
+    float convergence_deltaR;
+    float convergence_deltaT;
+    int min_laserCloudSelNum;
+    double imu_weight;
 
     lvi_sam::cloud_info cloudInfo;
     pcl::PointCloud<PointType>::Ptr laserCloudCornerLast;
@@ -129,7 +144,13 @@ private:
         // prepare and run scan2map optimization
         scan2MapOptimization();
 
-        publishOdometry(msgIn->header.stamp);
+        static double lastScanEndTime = 0;
+        if (cloudInfo.scanEndTime <= lastScanEndTime) {
+            cloudInfo.scanEndTime = lastScanEndTime + 0.1;
+        }
+        lastScanEndTime = cloudInfo.scanEndTime;
+
+        publishOdometry(ros::Time(cloudInfo.scanEndTime));
     }
 
     void downsampleCurrentScan()
@@ -285,8 +306,8 @@ private:
         float crz = cos(transformTobeMapped[0]);
 
         int laserCloudSelNum = laserCloudOri->size();
-        if (laserCloudSelNum < 50) {
-            ROS_WARN("Not enough optimization coeffs: %d", laserCloudSelNum);
+        if (laserCloudSelNum < min_laserCloudSelNum) {
+            ROS_WARN("Not enough optimization coeffs: %d (min: %d)", laserCloudSelNum, min_laserCloudSelNum);
             return false;
         }
 
@@ -325,7 +346,7 @@ private:
         // simple convergence check (magnitude)
         float deltaR = sqrt(pow(matX.at<float>(0,0),2) + pow(matX.at<float>(1,0),2) + pow(matX.at<float>(2,0),2));
         float deltaT = sqrt(pow(matX.at<float>(3,0),2) + pow(matX.at<float>(4,0),2) + pow(matX.at<float>(5,0),2));
-        if (deltaR < 1e-3 && deltaT < 1e-3)
+        if (deltaR < convergence_deltaR && deltaT < convergence_deltaT)
             return true;
 
         return false;
@@ -338,7 +359,6 @@ private:
         {
             if (std::abs(cloudInfo.imuPitchInit) < 1.4)
             {
-                double imuWeight = 0.01;
                 tf::Quaternion imuQuaternion;
                 tf::Quaternion transformQuaternion;
                 double rollMid, pitchMid, yawMid;
@@ -346,13 +366,13 @@ private:
                 // slerp roll
                 transformQuaternion.setRPY(transformTobeMapped[0], 0, 0);
                 imuQuaternion.setRPY(cloudInfo.imuRollInit, 0, 0);
-                tf::Matrix3x3(transformQuaternion.slerp(imuQuaternion, imuWeight)).getRPY(rollMid, pitchMid, yawMid);
+                tf::Matrix3x3(transformQuaternion.slerp(imuQuaternion, imu_weight)).getRPY(rollMid, pitchMid, yawMid);
                 transformTobeMapped[0] = rollMid;
 
                 // slerp pitch
                 transformQuaternion.setRPY(0, transformTobeMapped[1], 0);
                 imuQuaternion.setRPY(0, cloudInfo.imuPitchInit, 0);
-                tf::Matrix3x3(transformQuaternion.slerp(imuQuaternion, imuWeight)).getRPY(rollMid, pitchMid, yawMid);
+                tf::Matrix3x3(transformQuaternion.slerp(imuQuaternion, imu_weight)).getRPY(rollMid, pitchMid, yawMid);
                 transformTobeMapped[1] = pitchMid;
             }
         }
@@ -379,7 +399,7 @@ private:
             kdtreeCornerFromMap->setInputCloud(laserCloudCornerFromMapDS);
             kdtreeSurfFromMap->setInputCloud(laserCloudSurfFromMapDS);
 
-            for (int iterCount = 0; iterCount < 30; iterCount++)
+            for (int iterCount = 0; iterCount < max_iter_count; iterCount++)
             {
                 laserCloudOri->clear(); coeffSel->clear();
                 cornerOptimization();
